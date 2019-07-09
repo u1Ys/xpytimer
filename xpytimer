@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+#
+# 	$Id: xpytimer,v 1.9 2019/05/26 01:45:45 u1 Exp u1 $	
+
+import sys, os, re
+import math, subprocess
+import time
+from perlcompat import warn, die, getopts
+
+from Xlib import X, display
+
+import pygame
+import pygame.gfxdraw, pygame.transform
+import pygcolor
+
+scriptname = os.path.basename(sys.argv[0])
+def usage():
+    die(f'''{scriptname} usage: [OPTIONS] TIME
+    -s - TIME is second
+    -S - Set mode of timer for presenter
+    -W [WIDTH] - set widht to WIDTH
+    -H [HEIGHT] - set height to HEIGHT''')
+
+opts = getopts('sSW:H:')
+
+COLOR_AT_DEFAULT = { 'foreground': 'White', 'background': 'Black' }
+COLOR_AT = {
+    100: { 'foreground': os.environ.get('THEME_COLOR', 'SteelBlue1') },
+    20:  { 'foreground': 'DarkOrange1' },
+    10:  { 'foreground': 'firebrick1' },
+    0:   { 'foreground': 'Black', 'background': 'firebrick1' },
+}
+
+X_FONT_NAME = '-hiro-fixed-medium-r-normal--8-80-75-75-c-80-iso646.1991-irv'
+X_FONT_WIDTH, X_FONT_HEIGHT = 8, 8
+
+PYGAME_FONT_NAME = '/etc/alternatives/fonts-japanese-gothic.ttf'
+PYGAME_FONT_SIZE = 680
+
+class Timer:
+    def __init__(self, minute, is_second=False):
+        self.second = minute if is_second else \
+                      minute * 60 
+        self.lasttime = self.second
+
+    def __str__(self):
+        last = max(self.last(), -1 * self.last())
+        minute, second = math.floor(last / 60), math.floor(last % 60)
+        return '{:02}:{:02}'.format(minute, second)
+
+    def last(self):
+        return self.lasttime
+
+    def ratio(self):
+        return self.last() / self.second
+
+    def is_end(self):
+        return self.last() <= 0
+
+    def advance(self):       
+        time.sleep(1)
+        self.lasttime -= 1
+
+class Monitor:
+    def __init__(self, timer, exist_next):
+        self.timer = timer
+        self.last_ratio = None
+        self.is_blink = False
+        self.exist_next = exist_next
+
+    def event_loop(self):
+        while True:
+            try:
+                if self.timer.is_end() and self.exist_next:
+                    break
+                if self.last_ratio != self.ratio_at():
+                    self.change_ratio_at_hook()
+                self.last_ratio = self.ratio_at()
+                if self.ratio_at() == min(COLOR_AT.keys()):
+                    self.is_blink = not(self.is_blink)
+                self.draw()
+                self.timer.advance()
+            except KeyboardInterrupt:                
+                try:
+                    input('Press return to resume: ')
+                except KeyboardInterrupt:
+                    break
+
+    def ratio_at(self):
+        for ratio  in sorted(COLOR_AT):
+            if ratio >= round(self.timer.ratio() * 100):
+                return ratio
+
+    def _color(self, elem):
+        color_ref = COLOR_AT[self.ratio_at()]
+        return color_ref.get(elem, COLOR_AT_DEFAULT[elem])
+
+    def fg_color(self):
+        if self.is_blink:
+            return self._color('background')
+        return self._color('foreground')
+
+    def bg_color(self):
+        if self.is_blink:
+            return self._color('foreground')
+        return self._color('background')
+
+    def change_ratio_at_hook(self):
+        warn('{}: change_ratio_at_hook ({} -> {})'.format(
+            self.timer, self.last_ratio, self.ratio_at()))
+        # 音は鳴らせる ↓ 一例 -u1 [2019/03/06]
+        # os.system(f'mplayer {/tmp/bell.mp3} > /dev/null 2> /dev/null &')
+        # pygame でも音鳴らせないか?  -u1 [2019/06/17]
+
+def get_screen_size():
+    global opts
+    output = subprocess.getoutput('xrandr --current')
+    m = re.search(r'(?:DP-?\d|HDMI-?\d) connected\s*(?:primary)?\s*(\d+)x(\d+)',
+                  '\n'.join(reversed(output.split('\n'))))
+    if m:
+        width = int(m.group(1)) if not opts.W else int(opts.W)
+        height = int(m.group(2)) if not opts.H else int(opts.H)
+        return width, height
+
+class Mon_X(Monitor):
+    def __init__(self, *args):
+        super().__init__(*args)
+
+        # 1. X サーバーと接続する
+        self.disp = display.Display()
+        # ディスプレイ変数の取得
+        self.screen = self.disp.screen()
+        # カラーマップを取得
+        self.colormap = self.screen.default_colormap
+         
+        # 2. 表示するウィンドウを作成する
+        self.max_width, self.max_height = get_screen_size()
+
+        self.y = self.max_height - X_FONT_HEIGHT
+        self.width = self.max_width
+         
+        self.window = self.screen.root.create_window(
+            # x, y, width, height
+            0, self.y, self.width, X_FONT_HEIGHT,
+            # border_width
+            0,
+            # depth
+            self.screen.root_depth,
+            # class
+            X.InputOutput,
+            X.CopyFromParent,
+            background_pixel=self.screen.black_pixel,
+            # ↓ これがあると xpywm の支配下に置かれない
+            override_redirect=1,
+            colormap=X.CopyFromParent,
+            # 3. XSelectInput() を使って必要なイベントを選択する
+            # 
+            # イベント集
+            # http://rio.la.coocan.jp/lab/xlib/004event.htm
+            event_mask = (X.ExposureMask))
+        self.window.set_wm_name(scriptname)
+        self.font = self.disp.open_font(X_FONT_NAME)
+        self.gcs = self._create_gcs()
+         
+        # 4. ウィンドウを表示する
+        self.window.map()
+
+        os.system('pidof xcompmgr > /dev/null && transset --id {} .7 > /dev/null'
+                  .format(self.window.id))
+
+    def _create_gcs(self):
+        gcs = {}
+
+        colors = list(COLOR_AT_DEFAULT.values())
+        for _ in COLOR_AT.values():
+            colors += list(_.values())
+
+        for color in colors:
+            pixel = self.colormap.alloc_named_color(color).pixel
+            gcs[color] = {}
+            gcs[color]['line'] = self.window.create_gc(foreground=pixel)
+            gcs[color]['font'] = self.window.create_gc(font=self.font, foreground=pixel)
+        return gcs
+
+    def draw(self):
+        color = self.fg_color()
+        self.window.clear_area(0, 0, self.width, X_FONT_HEIGHT)
+        # draw line
+        self.window.fill_rectangle(self.gcs[color]['line'], len(str(self.timer)) * X_FONT_WIDTH, 0,
+                                   max(0, int(self.max_width * self.timer.ratio())), X_FONT_HEIGHT)
+        # draw font background
+        string  = str(self.timer)
+        self.window.fill_rectangle(self.gcs[self.bg_color()]['line'], 0, 0,
+                                   X_FONT_WIDTH * len(string), X_FONT_HEIGHT)
+        # draw font
+        self.window.poly_text(self.gcs[color]['font'], 0, X_FONT_HEIGHT - 1,
+
+                              [ chr(c).encode() for c in list(string.encode()) ])
+        self.window.configure(stack_mode=X.Above)
+        # NOTE: the following line is necessary due to unknown reason
+        self.colormap.alloc_named_color('white')
+
+class Mon_pygame(Monitor):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.init_display(*get_screen_size())
+        self.palette = pygcolor.Null()
+
+    def init_display(self, width, height):          
+        # initialize pygame and create a window
+        pygame.display.init()
+        pygame.font.init()
+        self.screen = pygame.display.set_mode((width, height))
+        self.font = pygame.font.Font(PYGAME_FONT_NAME, PYGAME_FONT_SIZE)
+
+    def update(self):
+        pygame.display.update()
+        self.screen.fill((0, 0, 0, 255))
+
+    def draw(self):
+        color = self.palette.rgba(self.fg_color())
+        # Draw font background
+        pygame.draw.rect(self.screen, self.palette.rgba(self.bg_color()),
+                         (0, 0, self.screen.get_width(), self.screen.get_height()))
+        self.draw_label(self.font, color, str(self.timer))
+        self.update()
+
+    def draw_label(self, font, color, label):
+        text = font.render(label, 1, color)
+        x = (self.screen.get_width() - text.get_width()) / 2
+        y = (self.screen.get_height() - PYGAME_FONT_SIZE) / 2
+        self.screen.blit(text, (x, y))
+
+def main():
+    global opts
+
+    while True:
+        try:
+            minute = float(sys.argv.pop(1))
+        except:
+            exit(0)
+        try:
+            exist_next = sys.argv[1]
+        except:
+            exist_next = False
+        monitor = Mon_pygame if opts.S else Mon_X
+        w = monitor(Timer(minute, opts.s), exist_next)
+        w.event_loop()
+
+if __name__ == "__main__":
+    main()
