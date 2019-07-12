@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 #
-# 	$Id: xpytimer,v 1.9 2019/05/26 01:45:45 u1 Exp u1 $	
+# 	$Id: xpytimer,v 1.10 2019/07/12 09:33:53 u1 Exp u1 $	
 
-import sys, os, re
-import math, subprocess
+import sys
+import os
+import re
+
+import subprocess
 import time
-from perlcompat import warn, die, getopts
+import threading
+import _thread
 
 from Xlib import X, display
 
@@ -13,15 +17,15 @@ import pygame
 import pygame.gfxdraw, pygame.transform
 import pygcolor
 
+from perlcompat import die, getopts
+
 scriptname = os.path.basename(sys.argv[0])
 def usage():
     die(f'''{scriptname} usage: [OPTIONS] TIME
     -s - TIME is second
-    -S - Set mode of timer for presenter
+    -c - mode for chairman
     -W [WIDTH] - set widht to WIDTH
     -H [HEIGHT] - set height to HEIGHT''')
-
-opts = getopts('sSW:H:')
 
 COLOR_AT_DEFAULT = { 'foreground': 'White', 'background': 'Black' }
 COLOR_AT = {
@@ -38,15 +42,15 @@ PYGAME_FONT_NAME = '/etc/alternatives/fonts-japanese-gothic.ttf'
 PYGAME_FONT_SIZE = 680
 
 class Timer:
-    def __init__(self, minute, is_second=False):
-        self.second = minute if is_second else \
-                      minute * 60 
+    def __init__(self, val, is_second=False):
+        self.second = val if is_second else \
+                      val * 60
         self.lasttime = self.second
 
     def __str__(self):
         last = max(self.last(), -1 * self.last())
-        minute, second = math.floor(last / 60), math.floor(last % 60)
-        return '{:02}:{:02}'.format(minute, second)
+        minute, second = int(last / 60), int(last % 60)
+        return f'{minute:02}:{second:02}'
 
     def last(self):
         return self.lasttime
@@ -57,34 +61,44 @@ class Timer:
     def is_end(self):
         return self.last() <= 0
 
-    def advance(self):       
+    def advance(self):
         time.sleep(1)
         self.lasttime -= 1
 
 class Monitor:
     def __init__(self, timer, exist_next):
         self.timer = timer
+        self.run = True
         self.last_ratio = None
         self.is_blink = False
         self.exist_next = exist_next
 
     def event_loop(self):
+        kh = threading.Thread(target=self.keyboard_handler)
+        kh.start()
+        
         while True:
-            try:
-                if self.timer.is_end() and self.exist_next:
-                    break
-                if self.last_ratio != self.ratio_at():
-                    self.change_ratio_at_hook()
-                self.last_ratio = self.ratio_at()
-                if self.ratio_at() == min(COLOR_AT.keys()):
-                    self.is_blink = not(self.is_blink)
-                self.draw()
-                self.timer.advance()
-            except KeyboardInterrupt:                
-                try:
-                    input('Press return to resume: ')
-                except KeyboardInterrupt:
-                    break
+            if not self.run:
+                continue
+            # if time is up and next timer exists, end
+            if self.timer.is_end() and self.exist_next:
+                break
+            if self.last_ratio != self.ratio_at():
+                self.change_ratio_at_hook()
+            self.last_ratio = self.ratio_at()
+            if self.ratio_at() == min(COLOR_AT.keys()):
+                self.is_blink = not(self.is_blink)
+            self.draw()
+            self.timer.advance()
+
+    def keyboard_handler(self):
+        while True:
+            input('Press [enter] to stop: ')
+            self.run = False
+            if input('Input q to end (otherwise resume): ') == 'q':
+                os._exit(0)
+            else:
+                self.run = True                
 
     def ratio_at(self):
         for ratio  in sorted(COLOR_AT):
@@ -95,22 +109,16 @@ class Monitor:
         color_ref = COLOR_AT[self.ratio_at()]
         return color_ref.get(elem, COLOR_AT_DEFAULT[elem])
 
-    def fg_color(self):
-        if self.is_blink:
-            return self._color('background')
-        return self._color('foreground')
+    def fg_color(self):      
+        return self._color('background') if self.is_blink \
+            else self._color('foreground')
 
     def bg_color(self):
-        if self.is_blink:
-            return self._color('foreground')
-        return self._color('background')
+        return self._color('foreground') if self.is_blink \
+            else self._color('background')
 
     def change_ratio_at_hook(self):
-        warn('{}: change_ratio_at_hook ({} -> {})'.format(
-            self.timer, self.last_ratio, self.ratio_at()))
-        # 音は鳴らせる ↓ 一例 -u1 [2019/03/06]
-        # os.system(f'mplayer {/tmp/bell.mp3} > /dev/null 2> /dev/null &')
-        # pygame でも音鳴らせないか?  -u1 [2019/06/17]
+        None
 
 def get_screen_size():
     global opts
@@ -210,7 +218,7 @@ class Mon_pygame(Monitor):
         # initialize pygame and create a window
         pygame.display.init()
         pygame.font.init()
-        self.screen = pygame.display.set_mode((width, height))
+        self.screen = pygame.display.set_mode((width, height))        
         self.font = pygame.font.Font(PYGAME_FONT_NAME, PYGAME_FONT_SIZE)
 
     def update(self):
@@ -219,7 +227,7 @@ class Mon_pygame(Monitor):
 
     def draw(self):
         color = self.palette.rgba(self.fg_color())
-        # Draw font background
+        # draw font background
         pygame.draw.rect(self.screen, self.palette.rgba(self.bg_color()),
                          (0, 0, self.screen.get_width(), self.screen.get_height()))
         self.draw_label(self.font, color, str(self.timer))
@@ -233,18 +241,12 @@ class Mon_pygame(Monitor):
 
 def main():
     global opts
+    opts = getopts('scW:H:')
 
-    while True:
-        try:
-            minute = float(sys.argv.pop(1))
-        except:
-            exit(0)
-        try:
-            exist_next = sys.argv[1]
-        except:
-            exist_next = False
-        monitor = Mon_pygame if opts.S else Mon_X
-        w = monitor(Timer(minute, opts.s), exist_next)
+    monitor = Mon_pygame if opts.c else Mon_X
+    args = sys.argv[1:]
+    for arg in args:
+        w = monitor(Timer(float(arg), opts.s), not(arg == args[-1]))
         w.event_loop()
 
 if __name__ == "__main__":
