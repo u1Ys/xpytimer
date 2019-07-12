@@ -9,7 +9,6 @@ import re
 import subprocess
 import time
 import threading
-import _thread
 
 from Xlib import X, display
 
@@ -25,7 +24,8 @@ def usage():
     -s - TIME is second
     -c - mode for chairman
     -W [WIDTH] - set widht to WIDTH
-    -H [HEIGHT] - set height to HEIGHT''')
+    -H [HEIGHT] - set height to HEIGHT
+    -h show this usage''')
 
 COLOR_AT_DEFAULT = { 'foreground': 'White', 'background': 'Black' }
 COLOR_AT = {
@@ -241,12 +241,13 @@ class Mon_pygame(Monitor):
 
 def main():
     global opts
-    opts = getopts('scW:H:')
+    opts = getopts('scW:H:') or usage()
+    if opts.h:
+        usage()
 
     monitor = Mon_pygame if opts.c else Mon_X
-    args = sys.argv[1:]
-    for arg in args:
-        w = monitor(Timer(float(arg), opts.s), not(arg == args[-1]))
+    for arg in sys.argv[1:]:
+        w = monitor(Timer(float(arg), opts.s), not(arg == sys.argv[-1]))
         w.event_loop()
 
 if __name__ == "__main__":
