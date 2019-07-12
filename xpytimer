@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# 	$Id: xpytimer,v 1.10 2019/07/12 09:33:53 u1 Exp u1 $	
+# 	$Id: xpytimer,v 1.11 2019/07/12 12:23:19 u1 Exp u1 $	
 
 import sys
 import os
@@ -23,13 +23,13 @@ def usage():
     die(f'''{scriptname} usage: [OPTIONS] TIME
     -s - TIME is second
     -c - mode for chairman
-    -W [WIDTH] - set widht to WIDTH
-    -H [HEIGHT] - set height to HEIGHT
+    -W WIDTH - set widht to WIDTH
+    -H HEIGHT - set height to HEIGHT
     -h show this usage''')
 
 COLOR_AT_DEFAULT = { 'foreground': 'White', 'background': 'Black' }
 COLOR_AT = {
-    100: { 'foreground': os.environ.get('THEME_COLOR', 'SteelBlue1') },
+    100: { 'foreground': os.environ.get('THEME_COLOR', 'aquremarine1') },
     20:  { 'foreground': 'DarkOrange1' },
     10:  { 'foreground': 'firebrick1' },
     0:   { 'foreground': 'Black', 'background': 'firebrick1' },
@@ -79,6 +79,7 @@ class Monitor:
         
         while True:
             if not self.run:
+                time.sleep(1)
                 continue
             # if time is up and next timer exists, end
             if self.timer.is_end() and self.exist_next:
@@ -94,11 +95,13 @@ class Monitor:
     def keyboard_handler(self):
         while True:
             input('Press [enter] to stop: ')
+            print('** POSE **')
             self.run = False
-            if input('Input q to end (otherwise resume): ') == 'q':
+            if input('\'q\' to end (otherwise resume): ') == 'q':
                 os._exit(0)
             else:
-                self.run = True                
+                print('** RESUME **')
+                self.run = True
 
     def ratio_at(self):
         for ratio  in sorted(COLOR_AT):
@@ -134,14 +137,12 @@ class Mon_X(Monitor):
     def __init__(self, *args):
         super().__init__(*args)
 
-        # 1. X サーバーと接続する
+        # 1. connect to X server
         self.disp = display.Display()
-        # ディスプレイ変数の取得
         self.screen = self.disp.screen()
-        # カラーマップを取得
         self.colormap = self.screen.default_colormap
          
-        # 2. 表示するウィンドウを作成する
+        # 2. create window
         self.max_width, self.max_height = get_screen_size()
 
         self.y = self.max_height - X_FONT_HEIGHT
@@ -158,19 +159,15 @@ class Mon_X(Monitor):
             X.InputOutput,
             X.CopyFromParent,
             background_pixel=self.screen.black_pixel,
-            # ↓ これがあると xpywm の支配下に置かれない
             override_redirect=1,
             colormap=X.CopyFromParent,
-            # 3. XSelectInput() を使って必要なイベントを選択する
-            # 
-            # イベント集
-            # http://rio.la.coocan.jp/lab/xlib/004event.htm
+            # 3. use XSelectInput() to get necessary events
+            # events list; ref: http://rio.la.coocan.jp/lab/xlib/004event.htm
             event_mask = (X.ExposureMask))
         self.window.set_wm_name(scriptname)
         self.font = self.disp.open_font(X_FONT_NAME)
-        self.gcs = self._create_gcs()
-         
-        # 4. ウィンドウを表示する
+        self.gcs = self._create_gcs()         
+        # 4. show window
         self.window.map()
 
         os.system('pidof xcompmgr > /dev/null && transset --id {} .7 > /dev/null'
@@ -202,7 +199,6 @@ class Mon_X(Monitor):
                                    X_FONT_WIDTH * len(string), X_FONT_HEIGHT)
         # draw font
         self.window.poly_text(self.gcs[color]['font'], 0, X_FONT_HEIGHT - 1,
-
                               [ chr(c).encode() for c in list(string.encode()) ])
         self.window.configure(stack_mode=X.Above)
         # NOTE: the following line is necessary due to unknown reason
@@ -239,9 +235,13 @@ class Mon_pygame(Monitor):
         y = (self.screen.get_height() - PYGAME_FONT_SIZE) / 2
         self.screen.blit(text, (x, y))
 
+    def change_ratio_at_hook(self):
+        None
+        # ring bell? -u1 [2019/07/12]
+
 def main():
     global opts
-    opts = getopts('scW:H:') or usage()
+    opts = getopts('scW:H:h') or usage()
     if opts.h:
         usage()
 
