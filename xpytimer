@@ -55,6 +55,9 @@ class Timer:
     def last(self):
         return self.lasttime
 
+    def reset(self):
+        self.lasttime = self.second
+
     def ratio(self):
         return self.last() / self.second
 
@@ -73,10 +76,15 @@ class Monitor:
         self.is_blink = False
         self.exist_next = exist_next
 
+    def usage(self):
+        return '\'q\': quit, otherwise: pause/resume'
+
+    # ------------------------
+    # events
     def event_loop(self):
         kh = threading.Thread(target=self.keyboard_handler)
         kh.start()
-        
+      
         while True:
             if not self.run:
                 time.sleep(1)
@@ -92,22 +100,25 @@ class Monitor:
             self.draw()
             self.timer.advance()
 
-    def keyboard_handler(self):
-        while True:
-            input('Press [enter] to stop: ')
-            print('** POSE **')
-            self.run = False
-            if input('\'q\' to end (otherwise resume): ') == 'q':
-                os._exit(0)
-            else:
-                print('** RESUME **')
-                self.run = True
-
     def ratio_at(self):
         for ratio  in sorted(COLOR_AT):
             if ratio >= round(self.timer.ratio() * 100):
                 return ratio
 
+    def keyboard_handler(self):
+        while True:
+            if input(self.usage() + ': ') == 'q':
+                os._exit(0)
+            else:
+                if self.run:
+                    print('** PAUSE **')
+                self.run = not(self.run)                
+
+    def change_ratio_at_hook(self):
+        None
+
+    # ------------------------
+    # draw/color
     def _color(self, elem):
         color_ref = COLOR_AT[self.ratio_at()]
         return color_ref.get(elem, COLOR_AT_DEFAULT[elem])
@@ -119,9 +130,6 @@ class Monitor:
     def bg_color(self):
         return self._color('foreground') if self.is_blink \
             else self._color('background')
-
-    def change_ratio_at_hook(self):
-        None
 
 def get_screen_size():
     global opts
@@ -187,6 +195,8 @@ class Mon_X(Monitor):
             gcs[color]['font'] = self.window.create_gc(font=self.font, foreground=pixel)
         return gcs
 
+    # ------------------------
+    # draw/color
     def draw(self):
         color = self.fg_color()
         self.window.clear_area(0, 0, self.width, X_FONT_HEIGHT)
@@ -216,23 +226,56 @@ class Mon_pygame(Monitor):
         pygame.font.init()
         self.screen = pygame.display.set_mode((width, height))        
         self.font = pygame.font.Font(PYGAME_FONT_NAME, PYGAME_FONT_SIZE)
+        self.small_font = pygame.font.Font(PYGAME_FONT_NAME, int(PYGAME_FONT_SIZE/8))
 
+    def usage(self):
+        return '[SPACE]: pause/resume, q: quit, r: reset timer'
+
+    # ------------------------
+    # events
+    def keyboard_handler(self):
+        def pause():
+            self._draw()
+            self.draw_label('** PAUSE **', self.small_font, .5, .1)
+            self.update()
+            self.run = False
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        if self.run:
+                            pause()
+                        else:
+                            self.run = True
+                    elif event.key == pygame.K_q:
+                        os._exit(0)
+                    elif event.key == pygame.K_r:
+                        self.timer.reset()
+                        pause()
+
+    # ------------------------
+    # draw/color
     def update(self):
         pygame.display.update()
         self.screen.fill((0, 0, 0, 255))
 
-    def draw(self):
-        color = self.palette.rgba(self.fg_color())
+    def _draw(self):
         # draw font background
         pygame.draw.rect(self.screen, self.palette.rgba(self.bg_color()),
                          (0, 0, self.screen.get_width(), self.screen.get_height()))
-        self.draw_label(self.font, color, str(self.timer))
+        self.draw_label(str(self.timer), self.font, .5, .5)
+        self.draw_label(self.usage(), self.small_font, .5, .9)
+
+    def draw(self):
+        self._draw()
         self.update()
 
-    def draw_label(self, font, color, label):
+    def draw_label(self, label, font, x, y):
+        color = self.palette.rgba(self.fg_color())
         text = font.render(label, 1, color)
-        x = (self.screen.get_width() - text.get_width()) / 2
-        y = (self.screen.get_height() - PYGAME_FONT_SIZE) / 2
+        x *= self.screen.get_width() - text.get_width()
+        y *= self.screen.get_height() - text.get_height()
         self.screen.blit(text, (x, y))
 
     def change_ratio_at_hook(self):
