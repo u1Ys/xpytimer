@@ -81,7 +81,6 @@ class Null:
                     continue
                 color, name = line.split('\t\t')
                 r, g, b = color.split()
-                # 大文字・小文字を区別しない -yuichi [2019/03/08]
                 name = name.lower()
                 self.define_palette(name, int(r), int(g), int(b))
 
@@ -106,7 +105,6 @@ class Null:
         self.palette[name] = [r, g, b, a]
 
     def rgba(self, name, alpha=1):
-        # 大文字・小文字を区別しない -yuichi [2019/03/08]
         name = name.lower()
         try:
             color = self.palette[name]
