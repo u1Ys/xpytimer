@@ -29,7 +29,7 @@ def usage():
 
 COLOR_AT_DEFAULT = { 'foreground': 'White', 'background': 'Black' }
 COLOR_AT = {
-    100: { 'foreground': os.environ.get('THEME_COLOR', 'Green') },
+    100: { 'foreground': os.environ.get('THEME_COLOR', 'Aquamarine1') },
     20:  { 'foreground': 'DarkOrange1' },
     10:  { 'foreground': 'firebrick1' },
     0:   { 'foreground': 'Black', 'background': 'firebrick1' },
