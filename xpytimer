@@ -20,7 +20,7 @@ from perlcompat import die, getopts
 
 scriptname = os.path.basename(sys.argv[0])
 def usage():
-    die(f'''{scriptname} usage: [OPTIONS] TIME
+    die(f'''{scriptname} usage: [OPTIONS] TIME [TIME]
     -s - TIME is second
     -c - mode for chairman
     -W WIDTH - set widht to WIDTH
