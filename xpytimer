@@ -69,22 +69,20 @@ class Timer:
         self.lasttime -= 1
 
 class Monitor:
-    def __init__(self, timer, exist_next):
+    def __init__(self, timer, exist_next=False):
         self.timer = timer
+        self.exist_next = exist_next
         self.run = True
         self.last_ratio = None
         self.is_blink = False
-        self.exist_next = exist_next
 
     def usage(self):
         return '\'q\': quit, otherwise: pause/resume'
 
-    # ------------------------
     # events
     def event_loop(self):
         kh = threading.Thread(target=self.keyboard_handler)
-        kh.start()
-      
+        kh.start()     
         while True:
             if not self.run:
                 time.sleep(1)
@@ -93,7 +91,7 @@ class Monitor:
             if self.timer.is_end() and self.exist_next:
                 break
             if self.last_ratio != self.ratio_at():
-                self.change_ratio_at_hook()
+                self.change_ratio_hook()
             self.last_ratio = self.ratio_at()
             if self.ratio_at() == min(COLOR_AT.keys()):
                 self.is_blink = not(self.is_blink)
@@ -112,12 +110,11 @@ class Monitor:
             else:
                 if self.run:
                     print('** PAUSE **')
-                self.run = not(self.run)                
+                self.run = not(self.run)
 
-    def change_ratio_at_hook(self):
+    def change_ratio_hook(self):
         None
 
-    # ------------------------
     # draw/color
     def _color(self, elem):
         color_ref = COLOR_AT[self.ratio_at()]
@@ -142,8 +139,8 @@ def get_screen_size():
         return width, height
 
 class Mon_X(Monitor):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
 
         # 1. connect to X server
         self.disp = display.Display()
@@ -215,8 +212,8 @@ class Mon_X(Monitor):
         self.colormap.alloc_named_color('white')
 
 class Mon_pygame(Monitor):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
         self.init_display(*get_screen_size())
         self.palette = pygcolor.Null()
 
@@ -231,7 +228,6 @@ class Mon_pygame(Monitor):
     def usage(self):
         return '[SPACE]: pause/resume, q: quit, r: reset timer'
 
-    # ------------------------
     # events
     def keyboard_handler(self):
         def pause():
@@ -254,7 +250,6 @@ class Mon_pygame(Monitor):
                         self.timer.reset()
                         pause()
 
-    # ------------------------
     # draw/color
     def update(self):
         pygame.display.update()
@@ -278,10 +273,6 @@ class Mon_pygame(Monitor):
         y *= self.screen.get_height() - text.get_height()
         self.screen.blit(text, (x, y))
 
-    def change_ratio_at_hook(self):
-        None
-        # ring bell? -u1 [2019/07/12]
-
 def main():
     global opts
     opts = getopts('scW:H:h') or usage()
@@ -289,8 +280,9 @@ def main():
         usage()
 
     monitor = Mon_pygame if opts.c else Mon_X
-    for arg in sys.argv[1:]:
-        w = monitor(Timer(float(arg), opts.s), not(arg == sys.argv[-1]))
+    for i, arg in enumerate(sys.argv[1:]):
+        w = monitor(Timer(float(arg), opts.s),
+                    exist_next=(i != (len(sys.argv) - 2)))
         w.event_loop()
 
 if __name__ == "__main__":
