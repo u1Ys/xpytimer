@@ -18,9 +18,9 @@ import pygcolor
 
 from perlcompat import die, getopts
 
-scriptname = os.path.basename(sys.argv[0])
+prog = os.path.basename(sys.argv[0])
 def usage():
-    die(f'''{scriptname} usage: [OPTIONS] TIME [TIME]
+    die(f'''{prog} usage: [OPTIONS] TIME [TIME]
     -s - TIME is second
     -c - mode for chairman
     -W WIDTH - set widht to WIDTH
@@ -76,7 +76,7 @@ class Monitor:
         self.last_ratio = None
         self.is_blink = False
 
-    def usage(self):
+    def _usage(self):
         return '\'q\': quit, otherwise: pause/resume'
 
     # events
@@ -90,22 +90,25 @@ class Monitor:
             # if time is up and next timer exists, end
             if self.timer.is_end() and self.exist_next:
                 break
-            if self.last_ratio != self.ratio_at():
+            if self.last_ratio != self._ratio_at():
                 self.change_ratio_hook()
-            self.last_ratio = self.ratio_at()
-            if self.ratio_at() == min(COLOR_AT.keys()):
+            self.last_ratio = self._ratio_at()
+            if self._ratio_at() == min(COLOR_AT.keys()):
                 self.is_blink = not(self.is_blink)
             self.draw()
             self.timer.advance()
 
-    def ratio_at(self):
+    def draw(self):
+        NotImplemented
+
+    def _ratio_at(self):
         for ratio  in sorted(COLOR_AT):
             if ratio >= round(self.timer.ratio() * 100):
                 return ratio
 
     def keyboard_handler(self):
         while True:
-            if input(self.usage() + ': ') == 'q':
+            if input(self._usage() + ': ') == 'q':
                 os._exit(0)
             else:
                 if self.run:
@@ -117,7 +120,7 @@ class Monitor:
 
     # draw/color
     def _color(self, elem):
-        color_ref = COLOR_AT[self.ratio_at()]
+        color_ref = COLOR_AT[self._ratio_at()]
         return color_ref.get(elem, COLOR_AT_DEFAULT[elem])
 
     def fg_color(self):      
@@ -127,6 +130,13 @@ class Monitor:
     def bg_color(self):
         return self._color('foreground') if self.is_blink \
             else self._color('background')
+
+class Mon_CLI(Monitor):
+    def draw(self):
+        print(str(self.timer))
+
+    def _usage(self):
+        return super()._usage() + '\n'
 
 def get_screen_size():
     global opts
@@ -169,7 +179,7 @@ class Mon_X(Monitor):
             # 3. use XSelectInput() to get necessary events
             # events list; ref: http://rio.la.coocan.jp/lab/xlib/004event.htm
             event_mask = (X.ExposureMask))
-        self.window.set_wm_name(scriptname)
+        self.window.set_wm_name(prog)
         self.font = self.disp.open_font(X_FONT_NAME)
         self.gcs = self._create_gcs()         
         # 4. show window
@@ -225,7 +235,7 @@ class Mon_pygame(Monitor):
         self.font = pygame.font.Font(PYGAME_FONT_NAME, PYGAME_FONT_SIZE)
         self.small_font = pygame.font.Font(PYGAME_FONT_NAME, int(PYGAME_FONT_SIZE/8))
 
-    def usage(self):
+    def _usage(self):
         return '[SPACE]: pause/resume, q: quit, r: reset timer'
 
     # events
@@ -260,7 +270,7 @@ class Mon_pygame(Monitor):
         pygame.draw.rect(self.screen, self.palette.rgba(self.bg_color()),
                          (0, 0, self.screen.get_width(), self.screen.get_height()))
         self.draw_label(str(self.timer), self.font, .5, .5)
-        self.draw_label(self.usage(), self.small_font, .5, .9)
+        self.draw_label(self._usage(), self.small_font, .5, .9)
 
     def draw(self):
         self._draw()
@@ -273,16 +283,25 @@ class Mon_pygame(Monitor):
         y *= self.screen.get_height() - text.get_height()
         self.screen.blit(text, (x, y))
 
+monitors = {
+    'cli': Mon_CLI,
+    'x': Mon_X,
+    'pygame': Mon_pygame,
+}
+
 def main():
     global opts
-    opts = getopts('scW:H:h') or usage()
+    opts = getopts('R:sm:W:H:h') or usage()
     if opts.h:
         usage()
 
-    monitor = Mon_pygame if opts.c else Mon_X
-    for i, arg in enumerate(sys.argv[1:]):
+    times = sys.argv[1:]
+    if opts.R:
+        times = times * int(opts.R)
+    monitor = monitors[opts.m] if opts.m else Mon_X
+    for i, arg in enumerate(times):
         w = monitor(Timer(float(arg), opts.s),
-                    exist_next=(i != (len(sys.argv) - 2)))
+                    exist_next=(i != (len(times) - 1)))
         w.event_loop()
 
 if __name__ == "__main__":
