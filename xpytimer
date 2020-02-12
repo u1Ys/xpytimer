@@ -37,9 +37,11 @@ prog = os.path.basename(sys.argv[0])
 def usage():
     die(f'''{prog} usage: [OPTIONS] TIME [TIME]
     -s - TIME is second
-    -c - mode for chairman
+    -R NUMBER - repeat timer NUMBER time
     -W WIDTH - set widht to WIDTH
     -H HEIGHT - set height to HEIGHT
+    -m cli|x|pygame - specify type of monitor
+    -S - ring sound
     -h show this usage''')
 
 class Timer:
