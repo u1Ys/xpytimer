@@ -1,0 +1,3 @@
+If you want to ring bell, put wav file on '~/lib/xpytimer/bell.wav'.
+
+For other uses, try 'xpytimer -h'.
