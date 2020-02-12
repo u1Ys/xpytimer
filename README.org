@@ -1,6 +1,6 @@
 If you want to ring bell, put your favorite wav file on
 '~/lib/xpytimer/bell.wav'. 
 
-You can change sound file path by changing SOUND_DIR and SOUND_FILE.
+You can change sound file path by changing SOUND_CMD.
 
 For other uses, try 'xpytimer -h'.
