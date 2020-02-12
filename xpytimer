@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-#
-# 	$Id: xpytimer,v 1.11 2019/07/12 12:23:19 u1 Exp u1 $	
 
 import sys
 import os
