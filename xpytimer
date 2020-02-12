@@ -18,15 +18,6 @@ import pygcolor
 
 from perlcompat import die, getopts
 
-prog = os.path.basename(sys.argv[0])
-def usage():
-    die(f'''{prog} usage: [OPTIONS] TIME [TIME]
-    -s - TIME is second
-    -c - mode for chairman
-    -W WIDTH - set widht to WIDTH
-    -H HEIGHT - set height to HEIGHT
-    -h show this usage''')
-
 COLOR_AT_DEFAULT = { 'foreground': 'White', 'background': 'Black' }
 COLOR_AT = {
     100: { 'foreground': os.environ.get('THEME_COLOR', 'Aquamarine1') },
@@ -40,6 +31,18 @@ X_FONT_WIDTH, X_FONT_HEIGHT = 8, 8
 
 PYGAME_FONT_NAME = '/etc/alternatives/fonts-japanese-gothic.ttf'
 PYGAME_FONT_SIZE = 680
+
+SOUND_DIR = '~/lib/xpytimer/'
+SOUND_FILE = 'bell.wav'
+
+prog = os.path.basename(sys.argv[0])
+def usage():
+    die(f'''{prog} usage: [OPTIONS] TIME [TIME]
+    -s - TIME is second
+    -c - mode for chairman
+    -W WIDTH - set widht to WIDTH
+    -H HEIGHT - set height to HEIGHT
+    -h show this usage''')
 
 class Timer:
     def __init__(self, val, is_second=False):
@@ -69,9 +72,11 @@ class Timer:
         self.lasttime -= 1
 
 class Monitor:
-    def __init__(self, timer, exist_next=False):
+    def __init__(self, timer, exist_next=False, sound=False):
         self.timer = timer
         self.exist_next = exist_next
+        self.sound = sound
+
         self.run = True
         self.last_ratio = None
         self.is_blink = False
@@ -116,7 +121,8 @@ class Monitor:
                 self.run = not(self.run)
 
     def change_ratio_hook(self):
-        None
+        if self.sound:
+            os.system(f'mplayer {SOUND_DIR}{SOUND_FILE}')
 
     # draw/color
     def _color(self, elem):
@@ -291,7 +297,7 @@ monitors = {
 
 def main():
     global opts
-    opts = getopts('R:sm:W:H:h') or usage()
+    opts = getopts('R:sm:W:H:hS') or usage()
     if opts.h:
         usage()
 
@@ -301,7 +307,8 @@ def main():
     monitor = monitors[opts.m] if opts.m else Mon_X
     for i, arg in enumerate(times):
         w = monitor(Timer(float(arg), opts.s),
-                    exist_next=(i != (len(times) - 1)))
+                    exist_next=(i != (len(times) - 1)),
+                    sound=opts.S)
         w.event_loop()
 
 if __name__ == "__main__":
