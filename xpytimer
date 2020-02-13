@@ -40,7 +40,8 @@ def usage():
     -W WIDTH - set widht to WIDTH
     -H HEIGHT - set height to HEIGHT
     -m cli|x|pygame - specify type of monitor
-    -S - ring sound
+    -S - ring sound. If you want to ring bell, put your favorite wav
+     file on ‘~/lib/xpytimer/bell.wav’
     -h show this usage''')
 
 class Timer:
