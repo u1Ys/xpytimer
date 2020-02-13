@@ -30,7 +30,7 @@ X_FONT_WIDTH, X_FONT_HEIGHT = 8, 8
 PYGAME_FONT_NAME = '/etc/alternatives/fonts-japanese-gothic.ttf'
 PYGAME_FONT_SIZE = 680
 
-SOUND_CMD = 'mplayer ~/lib/xpytimer/bell.wav'
+SOUND_CMD = 'aplay ~/lib/xpytimer/bell.wav 2> /dev/null &'
 
 prog = os.path.basename(sys.argv[0])
 def usage():
