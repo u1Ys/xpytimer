@@ -1,0 +1,7 @@
+5,7c5,6
+< 
+< def debug(*arg):
+<     pass
+---
+> from .. import configure
+> from ..util.log import debug
