@@ -32,6 +32,7 @@ PYGAME_FONT_SIZE = 680
 
 SOUND_CMD = 'aplay ~/lib/xpytimer/bell.wav 2> /dev/null'
 
+
 prog = os.path.basename(sys.argv[0])
 def usage():
     die(f'''{prog} usage: [OPTIONS] TIME [TIME]
@@ -40,14 +41,15 @@ def usage():
     -W WIDTH - set widht to WIDTH
     -H HEIGHT - set height to HEIGHT
     -m cli|x|pygame - specify type of monitor
-    -S - ring sound. If you want to ring bell, put your favorite wav
+    -S - ring sound. If you want to ring bell, put your preferable wav
      file on ‘~/lib/xpytimer/bell.wav’
     -h show this usage''')
 
+
 class Timer:
     def __init__(self, val, is_second=False):
-        self.second = val if is_second else \
-                      val * 60
+        self.second = val if is_second \
+            else val * 60
         self.lasttime = self.second
 
     def __str__(self):
@@ -71,6 +73,7 @@ class Timer:
         time.sleep(1)
         self.lasttime -= 1
 
+
 class Monitor:
     def __init__(self, timer, exist_next=False, sound=False):
         self.timer = timer
@@ -87,7 +90,7 @@ class Monitor:
     # events
     def event_loop(self):
         kh = threading.Thread(target=self.keyboard_handler)
-        kh.start()     
+        kh.start()
         while True:
             if not self.run:
                 time.sleep(1)
@@ -153,6 +156,7 @@ def get_screen_size():
         width = int(m.group(1)) if not opts.W else int(opts.W)
         height = int(m.group(2)) if not opts.H else int(opts.H)
         return width, height
+
 
 class Mon_X(Monitor):
     def __init__(self, *args, **kargs):
@@ -227,7 +231,8 @@ class Mon_X(Monitor):
         # NOTE: the following line is necessary due to unknown reason
         self.colormap.alloc_named_color('white')
 
-class Mon_pygame(Monitor):
+
+class ChairMan(Monitor):
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs)
         self.init_display(*get_screen_size())
@@ -295,7 +300,8 @@ monitors = {
     'pygame': Mon_pygame,
 }
 
-def main():
+
+if __name__ == "__main__":
     global opts
     opts = getopts('R:sm:W:H:hS') or usage()
     if opts.h:
@@ -310,6 +316,3 @@ def main():
                     exist_next=(i != (len(times) - 1)),
                     sound=opts.S)
         w.event_loop()
-
-if __name__ == "__main__":
-    main()
