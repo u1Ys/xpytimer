@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
 
-import sys
 import os
-import re
-
-import subprocess
-import time
+import sys
 import threading
-
-from Xlib import X, display
-
-import pygame
-import pygame.gfxdraw, pygame.transform
-import pygcolor
+import time
 
 from perlcompat import die, getopts
+import pygame
+from Xlib import X, display
 
-COLOR_AT_DEFAULT = { 'foreground': 'White', 'background': 'Black' }
-COLOR_AT = {
-    100: { 'foreground': os.environ.get('THEME_COLOR', 'Aquamarine1') },
-    20:  { 'foreground': 'DarkOrange1' },
-    10:  { 'foreground': 'firebrick1' },
-    0:   { 'foreground': 'Black', 'background': 'firebrick1' },
+from displaysize import _XRandrRequest
+import pygcolor
+
+COLOR_TBL = {
+    100: {'fg': os.environ.get('THEME_COLOR', 'Aquamarine1'),
+          'bg': 'Black'},
+    20: {'fg': 'orange'},
+    10: {'fg': 'firebrick1'},
+    0: {'fg': 'Black', 'bg': 'firebrick1'},
 }
 
 X_FONT_NAME = '-hiro-fixed-medium-r-normal--8-80-75-75-c-80-iso646.1991-irv'
@@ -33,286 +29,354 @@ PYGAME_FONT_SIZE = 680
 SOUND_CMD = 'aplay ~/lib/xpytimer/bell.wav 2> /dev/null'
 
 
-prog = os.path.basename(sys.argv[0])
-def usage():
-    die(f'''{prog} usage: [OPTIONS] TIME [TIME]
-    -s - TIME is second
-    -R NUMBER - repeat timer NUMBER time
-    -W WIDTH - set widht to WIDTH
-    -H HEIGHT - set height to HEIGHT
-    -m cli|x|pygame - specify type of monitor
-    -S - ring sound. If you want to ring bell, put your preferable wav
-     file on ‘~/lib/xpytimer/bell.wav’
-    -h show this usage''')
-
-
-class Timer:
+class Timer():
     def __init__(self, val, is_second=False):
-        self.second = val if is_second \
+        self.max_second = val if is_second \
             else val * 60
-        self.lasttime = self.second
+        self.lasttime = self.max_second
 
     def __str__(self):
-        last = max(self.last(), -1 * self.last())
+        last = abs(self.lasttime)
         minute, second = int(last / 60), int(last % 60)
         return f'{minute:02}:{second:02}'
 
-    def last(self):
-        return self.lasttime
-
-    def reset(self):
-        self.lasttime = self.second
-
+    @property
     def ratio(self):
-        return self.last() / self.second
+        return max(0, self.lasttime / self.max_second)
 
-    def is_end(self):
-        return self.last() <= 0
+    @property
+    def is_over(self):
+        return self.lasttime <= 0
 
     def advance(self):
         time.sleep(1)
         self.lasttime -= 1
 
+    def reset(self):
+        self.lasttime = self.max_second
 
-class Monitor:
-    def __init__(self, timer, exist_next=False, sound=False):
+
+class Monitor():
+    # keyword str: the keyword to specify this monitor class
+    keyword = ''
+
+    def __init__(self, timer,
+                 conitnue_after_over=False,
+                 sound=False,
+                 **kargs):
         self.timer = timer
-        self.exist_next = exist_next
+        self.conitnue_after_over = conitnue_after_over
         self.sound = sound
 
-        self.run = True
         self.last_ratio = None
-        self.is_blink = False
 
-    def _usage(self):
-        return "'q': quit, otherwise: pause/resume"
+        self.key_handlers = {
+            'q': self.kill,
+            # undefined key is bind to pause/resume
+            'otherwise': self.pause_resume
+        }
 
-    # events
-    def event_loop(self):
-        kh = threading.Thread(target=self.keyboard_handler)
-        kh.start()
-        while True:
-            if not self.run:
-                time.sleep(1)
-                continue
-            # if time is up and next timer exists, end
-            if self.timer.is_end() and self.exist_next:
-                break
-            if self.last_ratio != self._ratio_at():
-                self.change_ratio_hook()
-            self.last_ratio = self._ratio_at()
-            if self._ratio_at() == min(COLOR_AT.keys()):
-                self.is_blink = not(self.is_blink)
-            self.draw()
-            self.timer.advance()
+    @property
+    def usage(self):
+        return ', '.join([f'[{key}] {method.__doc__}'
+                          for key, method in self.key_handlers.items()])
 
-    def draw(self):
-        NotImplemented
-
-    def _ratio_at(self):
-        for ratio  in sorted(COLOR_AT):
-            if ratio >= round(self.timer.ratio() * 100):
+    @property
+    def current_ratio(self):
+        for ratio in sorted(COLOR_TBL):
+            if round(self.timer.ratio * 100) <= ratio:
                 return ratio
 
-    def keyboard_handler(self):
-        while True:
-            if input(self._usage() + ': ') == 'q':
-                os._exit(0)
-            else:
-                if self.run:
-                    print('** PAUSE **')
-                self.run = not(self.run)
+    def start(self):
+        self.run = True
+        self.pause = False
+        self._event_loop()
 
-    def change_ratio_hook(self):
+    def pause_resume(self):
+        """pause/resume"""
+        self.pause = not(self.pause)
+
+    def stop(self):
+        self.run = False
+
+    def kill(self):
+        """quit"""
+        self.stop()
+        os._exit(0)
+
+    def _event_loop(self):
+        kh = threading.Thread(target=self.thread_target)
+        kh.start()
+        while self.run:
+            if self.pause:
+                time.sleep(1)
+                continue
+            self._advance()
+
+    def _advance(self):
+        self.draw()
+        self.timer.advance()
+
+        if self.timer.is_over and not self.conitnue_after_over:
+            self.stop()
+            return
+
+        if self.last_ratio != self.current_ratio:
+            self.last_ratio = self.current_ratio
+            self._change_ratio_hook()
+
+    def _change_ratio_hook(self):
         if self.sound:
             os.system(SOUND_CMD + ' &')
 
-    # draw/color
-    def _color(self, elem):
-        color_ref = COLOR_AT[self._ratio_at()]
-        return color_ref.get(elem, COLOR_AT_DEFAULT[elem])
+    def draw(self):
+        pass
 
-    def fg_color(self):      
-        return self._color('background') if self.is_blink \
-            else self._color('foreground')
+    def thread_target(self):
+        while True:
+            key = input(f'{self.usage}: ')
+            method = self.key_handlers.get(key,
+                                           self.key_handlers['otherwise'])
+            method()
 
-    def bg_color(self):
-        return self._color('foreground') if self.is_blink \
-            else self._color('background')
 
-class Mon_CLI(Monitor):
+class CLI(Monitor):
+    keyword = 'cli'
+
     def draw(self):
         print(str(self.timer))
 
-    def _usage(self):
-        return super()._usage() + '\n'
 
-def get_screen_size():
-    global opts
-    output = subprocess.getoutput('xrandr --current')
-    m = re.search(r'(?:DP-?\d|HDMI-?\d) connected\s*(?:primary)?\s*(\d+)x(\d+)',
-                  '\n'.join(reversed(output.split('\n'))))
-    if m:
-        width = int(m.group(1)) if not opts.W else int(opts.W)
-        height = int(m.group(2)) if not opts.H else int(opts.H)
+class XMonitor(Monitor):
+    def __init__(self, *args, width=None, height=None, **kargs):
+        super().__init__(*args, **kargs)
+
+        self.width = width
+        self.height = height
+
+        self.display = display.Display()
+        self.screen = self.display.screen()
+        self.xrandr_request = _XRandrRequest(self.display, self.screen)
+        self.is_blink = False
+
+    def get_screen_size(self):
+        width, height = self.xrandr_request.get_screen_size()
+        if self.width is not None:
+            width = int(self.width)
+        if self.height is not None:
+            height = int(self.height)
         return width, height
 
+    def _color(self, key):
+        color_ref = COLOR_TBL[self.current_ratio]
+        return color_ref.get(key,
+                             COLOR_TBL[100][key])
 
-class Mon_X(Monitor):
+    @property
+    def fg_color(self):
+        return self._color('bg') if self.is_blink \
+            else self._color('fg')
+
+    @property
+    def bg_color(self):
+        return self._color('fg') if self.is_blink \
+            else self._color('bg')
+
+    def _advance(self):
+        super()._advance()
+
+        if self.current_ratio == min(COLOR_TBL):
+            self.is_blink = not(self.is_blink)
+
+
+class Bar(XMonitor):
+    keyword = 'bar|x'
+
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs)
 
-        # 1. connect to X server
-        self.disp = display.Display()
-        self.screen = self.disp.screen()
         self.colormap = self.screen.default_colormap
-         
-        # 2. create window
-        self.max_width, self.max_height = get_screen_size()
 
-        self.y = self.max_height - X_FONT_HEIGHT
-        self.width = self.max_width
-         
-        self.window = self.screen.root.create_window(
-            # x, y, width, height
-            0, self.y, self.width, X_FONT_HEIGHT,
-            # border_width
-            0,
-            # depth
-            self.screen.root_depth,
-            # class
+        self.window = self._create_window()
+        self.gcs = self._create_gcs()
+
+        self.window.map()
+
+        # transset window if xcompmgr is running
+        os.system('pidof xcompmgr > /dev/null && transset --id {} .7 > /dev/null'
+                  .format(self.window.id))
+
+    def _create_window(self):
+        self.width, height = self.get_screen_size()
+        return self.screen.root.create_window(
+            # x, y
+            0, height - X_FONT_HEIGHT,
+            # width, height
+            self.width, X_FONT_HEIGHT,
+            # border_width, depth
+            0, self.screen.root_depth,
             X.InputOutput,
             X.CopyFromParent,
             background_pixel=self.screen.black_pixel,
             override_redirect=1,
             colormap=X.CopyFromParent,
-            # 3. use XSelectInput() to get necessary events
             # events list; ref: http://rio.la.coocan.jp/lab/xlib/004event.htm
-            event_mask = (X.ExposureMask))
-        self.window.set_wm_name(prog)
-        self.font = self.disp.open_font(X_FONT_NAME)
-        self.gcs = self._create_gcs()         
-        # 4. show window
-        self.window.map()
-
-        os.system('pidof xcompmgr > /dev/null && transset --id {} .7 > /dev/null'
-                  .format(self.window.id))
+            event_mask=(X.ExposureMask)
+        )
 
     def _create_gcs(self):
+        font = self.display.open_font(X_FONT_NAME)
+
         gcs = {}
-
-        colors = list(COLOR_AT_DEFAULT.values())
-        for _ in COLOR_AT.values():
-            colors += list(_.values())
-
-        for color in colors:
+        for color in set([color
+                          for tbl in COLOR_TBL.values()
+                          for color in tbl.values()]):
             pixel = self.colormap.alloc_named_color(color).pixel
-            gcs[color] = {}
-            gcs[color]['line'] = self.window.create_gc(foreground=pixel)
-            gcs[color]['font'] = self.window.create_gc(font=self.font, foreground=pixel)
+            gcs[color] = {
+                'bar': self.window.create_gc(foreground=pixel),
+                'font': self.window.create_gc(font=font, foreground=pixel),
+            }
         return gcs
 
-    # ------------------------
-    # draw/color
     def draw(self):
-        color = self.fg_color()
         self.window.clear_area(0, 0, self.width, X_FONT_HEIGHT)
-        # draw line
-        self.window.fill_rectangle(self.gcs[color]['line'], len(str(self.timer)) * X_FONT_WIDTH, 0,
-                                   max(0, int(self.max_width * self.timer.ratio())), X_FONT_HEIGHT)
-        # draw font background
-        string  = str(self.timer)
-        self.window.fill_rectangle(self.gcs[self.bg_color()]['line'], 0, 0,
-                                   X_FONT_WIDTH * len(string), X_FONT_HEIGHT)
-        # draw font
-        self.window.poly_text(self.gcs[color]['font'], 0, X_FONT_HEIGHT - 1,
-                              [ chr(c).encode() for c in list(string.encode()) ])
+        timer_string = str(self.timer)
+        # draw bar
+        self.window.fill_rectangle(self.gcs[self.fg_color]['bar'],
+                                   len(timer_string) * X_FONT_WIDTH, 0,
+                                   int(self.width * self.timer.ratio), X_FONT_HEIGHT)
+        # draw timer_sting background
+        self.window.fill_rectangle(self.gcs[self.bg_color]['bar'],
+                                   0, 0,
+                                   len(timer_string) * X_FONT_WIDTH, X_FONT_HEIGHT)
+        # draw timer_sting
+        self.window.poly_text(self.gcs[self.fg_color]['font'],
+                              0, X_FONT_HEIGHT - 1,
+                              [c.encode() for c in timer_string])
         self.window.configure(stack_mode=X.Above)
         # NOTE: the following line is necessary due to unknown reason
         self.colormap.alloc_named_color('white')
 
 
-class ChairMan(Monitor):
+class Chairman(XMonitor):
+    keyword = 'pg|mon_pygame|chairman'
+
+    KEY_CODE = {
+        pygame.K_SPACE: 'space',
+        pygame.K_q: 'q',
+        pygame.K_r: 'r',
+    }
+
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs)
-        self.init_display(*get_screen_size())
+
+        self._init_display(*self.get_screen_size())
         self.palette = pygcolor.Null()
 
-    def init_display(self, width, height):          
+        # change key binding
+        self.key_handlers['space'] = self.pause_resume
+        del self.key_handlers['otherwise']
+        self.key_handlers['r'] = self.reset
+
+    def _init_display(self, width, height):
         # initialize pygame and create a window
         pygame.display.init()
+        self.pygame_screen = pygame.display.set_mode((width, height))
+
         pygame.font.init()
-        self.screen = pygame.display.set_mode((width, height))        
         self.font = pygame.font.Font(PYGAME_FONT_NAME, PYGAME_FONT_SIZE)
-        self.small_font = pygame.font.Font(PYGAME_FONT_NAME, int(PYGAME_FONT_SIZE/8))
+        self.small_font = pygame.font.Font(PYGAME_FONT_NAME, int(PYGAME_FONT_SIZE / 8))
 
-    def _usage(self):
-        return '[SPACE]: pause/resume, q: quit, r: reset timer'
+    def draw(self, notification=''):
+        def _draw_label(label, font, x=.5, y=.1):
+            color = self.palette.rgba(self.fg_color)
+            text = font.render(label, 1, color)
+            x *= self.pygame_screen.get_width() - text.get_width()
+            y *= self.pygame_screen.get_height() - text.get_height()
+            self.pygame_screen.blit(text, (x, y))
 
-    # events
-    def keyboard_handler(self):
-        def pause():
-            self._draw()
-            self.draw_label('** PAUSE **', self.small_font, .5, .1)
-            self.update()
-            self.run = False
+        # draw_alyways_display_component
+        pygame.draw.rect(self.pygame_screen, self.palette.rgba(self.bg_color),
+                         (0, 0, self.pygame_screen.get_width(), self.pygame_screen.get_height()))
+        _draw_label(str(self.timer), self.font, .5, .5)
+        _draw_label(self.usage, self.small_font, .5, .9)
+        # draw notification, if exist
+        if notification != '':
+            _draw_label(f'** {notification} **', self.small_font)
+        # update screen
+        pygame.display.update()
+        self.pygame_screen.fill((0, 0, 0, 255))
 
+    def pause_resume(self):
+        """pause/resume"""
+        super().pause_resume()
+        self.draw('PAUSE' if self.pause
+                  else 'RESUME')
+
+    def reset(self):
+        """reset"""
+        self.timer.reset()
+        self.pause = True
+        self.draw('RESET')
+
+    def thread_target(self):
         while True:
             for event in pygame.event.get():
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE:
-                        if self.run:
-                            pause()
-                        else:
-                            self.run = True
-                    elif event.key == pygame.K_q:
-                        os._exit(0)
-                    elif event.key == pygame.K_r:
-                        self.timer.reset()
-                        pause()
+                if event.type != pygame.KEYDOWN:
+                    continue
+                key = self.KEY_CODE.get(event.key, False)
+                method = self.key_handlers.get(key, False)
+                if method is False:
+                    continue
+                method()
 
-    # draw/color
-    def update(self):
-        pygame.display.update()
-        self.screen.fill((0, 0, 0, 255))
 
-    def _draw(self):
-        # draw font background
-        pygame.draw.rect(self.screen, self.palette.rgba(self.bg_color()),
-                         (0, 0, self.screen.get_width(), self.screen.get_height()))
-        self.draw_label(str(self.timer), self.font, .5, .5)
-        self.draw_label(self._usage(), self.small_font, .5, .9)
+monitors = [CLI, Bar, Chairman]
 
-    def draw(self):
-        self._draw()
-        self.update()
 
-    def draw_label(self, label, font, x, y):
-        color = self.palette.rgba(self.fg_color())
-        text = font.render(label, 1, color)
-        x *= self.screen.get_width() - text.get_width()
-        y *= self.screen.get_height() - text.get_height()
-        self.screen.blit(text, (x, y))
+def get_monitor(keyword=Bar.keyword):
+    for monitor in monitors:
+        if keyword.lower() in monitor.keyword:
+            return monitor
 
-monitors = {
-    'cli': Mon_CLI,
-    'x': Mon_X,
-    'pygame': Mon_pygame,
-}
+
+def usage():
+    die(
+        '''{0} usage: [OPTIONS] TIME [TIME]...
+    -s - TIME as second
+    -R NUMBER - repeat timer NUMBER times (e.g., {0} -R 3 5 = {0} 5 5
+     5)
+
+    -m {1} - specify type of monitor
+    -W WIDTH - set widht to WIDTH
+    -H HEIGHT - set height to HEIGHT
+
+    -S - ring sound. If you want to ring bell, put your preferable wav
+     file on ‘~/lib/xpytimer/bell.wav’
+
+    -h show this usage'''.format(os.path.basename(sys.argv[0]),
+                                 '|'.join([monitor.keyword for monitor in monitors]))
+    )
 
 
 if __name__ == "__main__":
-    global opts
-    opts = getopts('R:sm:W:H:hS') or usage()
+    opts = getopts('sR:m:W:H:Sh') or usage()
     if opts.h:
         usage()
 
     times = sys.argv[1:]
     if opts.R:
         times = times * int(opts.R)
-    monitor = monitors[opts.m] if opts.m else Mon_X
-    for i, arg in enumerate(times):
-        w = monitor(Timer(float(arg), opts.s),
-                    exist_next=(i != (len(times) - 1)),
-                    sound=opts.S)
-        w.event_loop()
+
+    monitor_class = get_monitor(opts.m or Bar.keyword) or usage()
+
+    while times:
+        timer = Timer(float(times.pop()), opts.s)
+        monitor = monitor_class(timer,
+                                # If the next timer does not exist,
+                                # continue even after the timer
+                                # expires
+                                conitnue_after_over=not bool(times),
+                                sound=opts.S,
+                                width=opts.W, height=opts.H)
+        monitor.start()
